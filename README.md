@@ -1,9 +1,9 @@
 ![Tilengine logo](Tilengine.png)
-# Tilengine - The 2D retro graphics engine
+# Tilengine-PSP - The 2D retro graphics engine for the PSP
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 [![Build Status](https://travis-ci.org/megamarc/Tilengine.svg?branch=master)](https://travis-ci.org/megamarc/Tilengine)
 
-Tilengine-PSP is the PSP port of [Tilengine](https://github.com/megamarc/Tilengine).
+Tilengine-PSP is the PSP port of [Tilengine](https://github.com/megamarc/Tilengine).<br/>
 Tilengine is an open source, cross-platform 2D graphics engine for creating classic/retro games with tile maps, sprites and palettes. Its unique scanline-based rendering algorithm makes raster effects a core feature, a technique used by many games running on real 2D graphics chips.
 
 http://www.tilengine.org
@@ -83,7 +83,7 @@ The following section shows how to create from scratch and execute a simple tile
 
 ![Test](test.png)
 
-Create a file called `test.c` in `Tilengine/samples` folder, and type the following code:
+Create a file called `test.c` in `Tilengine/psp_samples` folder, and type the following code:
 ```
 #include <pspkernel.h>
 #include <pspdisplay.h>
