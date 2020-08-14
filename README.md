@@ -191,3 +191,6 @@ These people contributed to tilengine:
 @adtennant - provided cmake and pkg-config support<br>
 @tvasenin - improved C# binding<br>
 @tyoungjr - LUA/FFI binding<br>
+
+## Disclaimer
+This repository contains sprites from the Mario and Sonic series for use in its examples. The use of these sprites is strictly intended for educational purposes, and no infringement is intended upon the original copyright holders. If the use of these sprites is in violation of the copyright holders' wishes, we will remove any offending assets upon request.
