@@ -11,14 +11,13 @@ http://www.tilengine.org
 Thanks [megamarc](https://github.com/megamarc) for writing such a portable and easy to read code.
 
 # Contents
-- [Tilengine - The 2D retro graphics engine](#tilengine---the-2d-retro-graphics-engine)
+- [Tilengine-PSP - The 2D retro graphics engine](#tilengine---the-2d-retro-graphics-engine)
 - [Contents](#contents)
 - [Features](#features)
 - [Getting binaries](#getting-binaries)
   - [Build from source](#build-from-source)
     - [PSP](#psp)
 - [Running the samples](#running-the-samples)
-  - [PSP](#unix-like)
 - [The tilengine window](#the-tilengine-window)
 - [Creating your first program](#creating-your-first-program)
 - [Documentation](#documentation)
