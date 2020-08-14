@@ -1,0 +1,55 @@
+TARGET_LIB = ./lib/psp/libTilengine.a
+OBJS = src/aes.o \
+src/Animation.o \
+src/Base64.o \
+src/Bitmap.o \
+src/Blitters.o \
+src/cJSON.o \
+src/Draw.o \
+src/GaussianBlur.o \
+src/Hash.o \
+src/Layer.o \
+src/List.o \
+src/LoadBitmap.o \
+src/LoadFile.o \
+src/LoadPalette.o \
+src/LoadSequencePack.o \
+src/LoadSpriteset.o \
+src/LoadTilemap.o \
+src/LoadTileset.o \
+src/LoadTMX.o \
+src/Math2D.o \
+src/Object.o \
+src/ObjectList.o \
+src/Palette.o \
+src/ResourcePacker.o \
+src/Sequence.o \
+src/SequencePack.o \
+src/simplexml.o \
+src/Sprite.o \
+src/Spriteset.o \
+src/Tables.o \
+src/Test.o \
+src/Tilemap.o \
+src/Tilengine.o \
+src/Tileset.o \
+src/Window.o \
+
+
+INCDIR += ./include
+CFLAGS = -G0 -Wall -Ofast -std=c99 -DPSP
+CXXFLAGS = $(CFLAGS) -fpic-fno-exceptions -fno-rtti
+ASFLAGS = $(CFLAGS)
+
+LIBDIR =
+LDFLAGS =
+LIBS =   -lSDL_ttf -lfreetype -lSDL_image -lpng -ljpeg -lSDLmain -lSDL -lg -lc -lGL -lGLU -lglut -lz -lm \
+            -lpspvfpu \
+            -L${PSPDEV}/psp/sdk/lib \
+            -L${PSPDEV}/psp \
+            -lpspdebug  -lpspgu -lpspctrl -lpspge -lpspirkeyb -lpsppower -lpsppower_driver \
+            -lpspdisplay -lpsphprm  -lpspsdk -lpsprtc -lpspaudio -lpsputility \
+            -lpspnet_inet  -lc -lpspuser
+
+PSPSDK=$(shell psp-config --pspsdk-path)
+include $(PSPSDK)/lib/build.mak

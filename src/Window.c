@@ -12,9 +12,18 @@
 #define MAX_PLAYERS	4		/* number of unique players */
 #define MAX_INPUTS	32		/* number of inputs per player */
 #define INPUT_MASK	(MAX_INPUTS - 1)
+#endif
 
 #include <string.h>
-#include "SDL2/SDL.h"
+#ifndef PSP
+	#include "SDL2/SDL.h"
+#endif
+#ifdef PSP
+	#include <SDL/SDL.h>
+	#include <SDL/SDL_thread.h>
+	//#include <pspkernel.h>
+	//int fd;
+#endif
 #include "Tilengine.h"
 #include "Tables.h"
 
@@ -22,15 +31,27 @@
 #define lerp(x, x0,x1, fx0,fx1) \
 	fx0 + (fx1-fx0)*(x-x0)/(x1-x0)
 
+#ifndef PSP
 static SDL_Window*   window;
 static SDL_Renderer* renderer;
 static SDL_Texture*	 backbuffer;
+
+
+#endif
 static SDL_Surface*	 resize_half_width;
 static SDL_Thread*   thread;
 static SDL_mutex*	 lock;
 static SDL_cond*	 cond;
 static SDL_Joystick* joy;
 static SDL_Rect		 dstrect;
+
+#ifdef PSP 
+const int bpp = 32;
+static SDL_Surface *window;
+static SDL_Surface*	 backbuffer; //check this
+
+#endif
+
 
 static bool			 init;
 static bool			 done;
@@ -50,7 +71,9 @@ typedef struct
 	bool enabled;
 	uint8_t joystick_id;
 	SDL_Joystick* joy;
-	SDL_Keycode keycodes[MAX_INPUTS];
+	#ifndef PSP
+		SDL_Keycode keycodes[MAX_INPUTS];
+	#endif
 	uint8_t joybuttons[MAX_INPUTS];
 	uint32_t inputs;
 }
@@ -64,8 +87,13 @@ struct
 	bool gaussian;
 	uint8_t table[256];
 	TLN_Overlay overlay_id;
-	SDL_Texture* glow;
-	SDL_Texture* overlay;
+	#ifndef PSP
+		SDL_Texture* glow;
+		SDL_Texture* overlay;
+	#elif defined PSP 
+		SDL_Surface* glow;
+		SDL_Surface* overlay;
+	#endif
 	SDL_Surface* overlays[TLN_MAX_OVERLAY];
 	SDL_Surface* blur;
 	uint8_t glow_factor;
@@ -134,7 +162,12 @@ static bool CreateWindow (void);
 static void DeleteWindow (void);
 static void hblur (uint8_t* scan, int width, int height, int pitch);
 static void Downsample2 (uint8_t* src, uint8_t* dst, int width, int height, int src_pitch, int dst_pitch);
-static void BuildFullOverlay (SDL_Texture* texture, SDL_Surface* pattern, uint8_t factor);
+#ifndef PSP
+	static void BuildFullOverlay (SDL_Texture* texture, SDL_Surface* pattern, uint8_t factor);
+#endif 
+#ifdef PSP 
+	static void BuildFullOverlay (SDL_Surface* texture, SDL_Surface* pattern, uint8_t factor);
+#endif
 static void EnableCRTEffect (void);
 
 /* external prototypes */
@@ -147,7 +180,14 @@ extern char* strdup(const char* s);
 /* create window delegate */
 static bool CreateWindow(void)
 {
-	SDL_DisplayMode mode;
+	#ifndef PSP 
+		SDL_DisplayMode mode;
+	#endif 
+	#ifdef PSP
+		SDL_VideoInfo* info = SDL_GetVideoInfo();
+	    SDL_Rect mode; //check this
+		//fd = sceIoOpen("log.txt", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+	#endif 
 	SDL_Surface* surface = NULL;
 	int factor;
 	int rflags;
@@ -157,7 +197,22 @@ static bool CreateWindow(void)
 	int pitch;
 
 	/*  gets desktop size and maximum window size */
-	SDL_GetDesktopDisplayMode(0, &mode);
+	#ifndef PSP
+		SDL_GetDesktopDisplayMode(0, &mode);
+	#endif 
+	#ifdef PSP
+	//TODO 
+			if(info != NULL)
+			{
+				mode.w = info->current_w;
+				mode.h = info->current_h;
+			}
+			// else 
+			// {
+			// 	mode.w = 480;
+			// 	mode.h = 272;
+			// }
+	#endif 
 	if (!(wnd_params.flags & CWF_FULLSCREEN))
 	{
 		rflags = 0;
@@ -178,11 +233,18 @@ static bool CreateWindow(void)
 		dstrect.h = wnd_height;
 	}
 	else
-	{
-		rflags = SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_BORDERLESS;
-#if SDL_VERSION_ATLEAST(2,0,5)
-		rflags |= SDL_WINDOW_ALWAYS_ON_TOP;
-#endif
+	{	
+
+		#ifndef PSP
+				rflags = SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_BORDERLESS;
+			#if SDL_VERSION_ATLEAST(2,0,5)
+				rflags |= SDL_WINDOW_ALWAYS_ON_TOP;
+			#endif
+		#endif
+
+		#ifdef PSP 
+				rflags = SDL_HWSURFACE;//SDL_SWSURFACE
+		#endif 
 		wnd_width = mode.w;
 		wnd_height = wnd_width * wnd_params.height / wnd_params.width;
 		if (wnd_height > mode.h)
@@ -201,7 +263,17 @@ static bool CreateWindow(void)
 	/* create window */
 	if (window_title == NULL)
 		window_title = strdup("Tilengine window");
-	window = SDL_CreateWindow(window_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, wnd_width, wnd_height, rflags);
+	
+	#ifndef PSP
+		window = SDL_CreateWindow(window_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, wnd_width, wnd_height, rflags);
+	#endif
+
+	#ifdef PSP 
+		window = SDL_SetVideoMode(wnd_width, wnd_height, bpp, rflags);// TODO CHECK BPP
+	#endif 
+
+
+	
 	if (!window)
 	{
 		DeleteWindow();
@@ -209,37 +281,68 @@ static bool CreateWindow(void)
 	}
 
 	/* create render context */
-	rflags = SDL_RENDERER_ACCELERATED;
-	if (wnd_params.flags & CWF_VSYNC)
-		rflags |= SDL_RENDERER_PRESENTVSYNC;
-	renderer = SDL_CreateRenderer(window, -1, rflags);
-	if (!renderer)
-	{
-		DeleteWindow();
-		return false;
-	}
+	#ifndef PSP 
+		rflags = SDL_RENDERER_ACCELERATED;
+		if (wnd_params.flags & CWF_VSYNC)
+			rflags |= SDL_RENDERER_PRESENTVSYNC;
+		renderer = SDL_CreateRenderer(window, -1, rflags); 
+		if (!renderer)
+		{
+			DeleteWindow();
+			return false;
+		}
+	#endif
 
+//DEBUG????
+// #ifndef NO_CRT
 	/* CRT effect textures */
-	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
+	#ifndef PSP 
+		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
+	#endif
+	
 	crt.overlay_id = TLN_OVERLAY_NONE;
-	crt.glow = SDL_CreateTexture(renderer, format, SDL_TEXTUREACCESS_STREAMING, wnd_params.width / 2, wnd_params.height / 2);
+	
+	#ifndef PSP 
+		crt.glow = SDL_CreateTexture(renderer, format, SDL_TEXTUREACCESS_STREAMING, wnd_params.width / 2, wnd_params.height / 2);
+	#endif
+	
+	#ifdef PSP 
+		crt.glow = SDL_CreateRGBSurface(0, wnd_params.width / 2, wnd_params.width / 2, 32, 0, 0, 0, 0); //check this
+	#endif 
+	
 	crt.blur = SDL_CreateRGBSurface(0, wnd_params.width / 2, wnd_params.height / 2, 32, 0, 0, 0, 0);
-	SDL_SetTextureBlendMode(crt.glow, SDL_BLENDMODE_ADD);
-	SDL_LockTexture(crt.glow, NULL, &pixels, &pitch);
-	memset(pixels, 0, pitch*wnd_params.height / 2);
-	SDL_UnlockTexture(crt.glow);
-	crt.overlay = SDL_CreateTexture(renderer, format, SDL_TEXTUREACCESS_STREAMING, wnd_width, wnd_height);
-	SDL_SetTextureBlendMode(crt.overlay, SDL_BLENDMODE_MOD);
-	crt.overlays[TLN_OVERLAY_APERTURE] = SDL_CreateRGBSurfaceFrom(pattern_aperture, 6, 4, 32, 24, 0, 0, 0, 0);
-	crt.overlays[TLN_OVERLAY_SHADOWMASK] = SDL_CreateRGBSurfaceFrom(pattern_shadowmask, 6, 2, 32, 24, 0, 0, 0, 0);
-	crt.overlays[TLN_OVERLAY_SCANLINES] = SDL_CreateRGBSurfaceFrom(pattern_scanlines, 3, 4, 32, 12, 0, 0, 0, 0);
+	
+	#ifndef PSP
+		SDL_SetTextureBlendMode(crt.glow, SDL_BLENDMODE_ADD);
+		SDL_LockTexture(crt.glow, NULL, &pixels, &pitch);
+		memset(pixels, 0, pitch*wnd_params.height / 2);
+		SDL_UnlockTexture(crt.glow);
+
+		crt.overlay = SDL_CreateTexture(renderer, format, SDL_TEXTUREACCESS_STREAMING, wnd_width, wnd_height);
+		SDL_SetTextureBlendMode(crt.overlay, SDL_BLENDMODE_MOD);
+	#endif 
+
+	#ifdef PSP
+	//TODO
+		/*check this snippet  */
+		//SDL_SetColorKey(crt.glow,SDL_SRCCOLORKEY|SDL_RLEACCEL,SDL_MapRGB(crt.overlay->format,255,255,255));//broken
+		//SDL_SetAlpha(crt.glow,SDL_SRCALPHA, SDL_ALPHA_TRANSPARENT);
+		
+		crt.overlay = SDL_CreateRGBSurface(0, wnd_width, wnd_height, 32, 0, 0, 0, 255);
+		//SDL_SetColorKey(crt.overlay,SDL_SRCCOLORKEY|SDL_RLEACCEL,SDL_MapRGB(crt.overlay->format,255,255,255));//check this 
+		//SDL_SetAlpha(crt.overlay, SDL_SRCALPHA, SDL_ALPHA_TRANSPARENT - 200);//check this 
+
+	#endif  
+	//crt.overlays[TLN_OVERLAY_APERTURE] = SDL_CreateRGBSurfaceFrom(pattern_aperture, 6, 4, 32, 24, 0, 0, 0, 0);
+	//crt.overlays[TLN_OVERLAY_SHADOWMASK] = SDL_CreateRGBSurfaceFrom(pattern_shadowmask, 6, 2, 32, 24, 0, 0, 0, 0);
+	//crt.overlays[TLN_OVERLAY_SCANLINES] = SDL_CreateRGBSurfaceFrom(pattern_scanlines, 3, 4, 32, 12, 0, 0, 0, 0);
 	if (wnd_params.file_overlay[0])
 		crt.overlays[TLN_OVERLAY_CUSTOM] = SDL_LoadBMP(wnd_params.file_overlay);
 
 	/* enables CRT effect */
-	if (crt_enable)
-		EnableCRTEffect();
-	else
+	//if (crt_enable)
+	//	EnableCRTEffect();
+	//else
 		TLN_DisableCRTEffect();
 
 	/* temporal downsample surface */
@@ -250,6 +353,7 @@ static bool CreateWindow(void)
 		SDL_ShowCursor(SDL_DISABLE);
 
 	/* one time init, avoid being forgotten in Alt+TAB */
+	#ifndef PSP
 	if (init == false)
 	{
 		/* Default input PLAYER 1 */
@@ -279,6 +383,12 @@ static bool CreateWindow(void)
 		}
 		init = true;
 	}
+	#else 
+		init = true;
+	#endif 
+// #endif 
+	// init = true;
+
 
 	done = false;
 	return true;
@@ -289,12 +399,19 @@ static void DeleteWindow (void)
 {
 	int c;
 
-	if (SDL_JoystickGetAttached(joy))
-		SDL_JoystickClose(joy);
+	#ifndef PSP
+		if (SDL_JoystickGetAttached(joy))
+			SDL_JoystickClose(joy);
 
-	/* CRT effect resources */
-	SDL_DestroyTexture (crt.glow);
-	SDL_DestroyTexture (crt.overlay);
+		/* CRT effect resources */
+		SDL_DestroyTexture (crt.glow);
+		SDL_DestroyTexture (crt.overlay);
+	#endif 
+	#ifdef PSP 
+		SDL_FreeSurface (crt.glow);
+		SDL_FreeSurface (crt.overlay);
+	#endif
+
 	SDL_FreeSurface (crt.blur);
 	for (c=0; c<TLN_MAX_OVERLAY; c++)
 	{
@@ -305,19 +422,28 @@ static void DeleteWindow (void)
 
 	if (backbuffer)
 	{
-		SDL_DestroyTexture (backbuffer);
+		#ifndef PSP
+			SDL_DestroyTexture (backbuffer);
+		#else 
+			SDL_FreeSurface (backbuffer);
 		backbuffer = NULL;
 	}
 	
-	if (renderer)
-	{
-		SDL_DestroyRenderer (renderer);
-		renderer = NULL;
-	}
+	#ifndef PSP
+		if (renderer)
+		{
+			SDL_DestroyRenderer (renderer);
+			renderer = NULL;
+		}
+	#endif
 
 	if (window)
 	{
-		SDL_DestroyWindow (window);
+		#ifndef PSP
+			SDL_DestroyWindow (window);
+		#else 
+			SDL_FreeSurface (window);
+		#endif
 		window = NULL;
 	}
 }
@@ -330,6 +456,7 @@ static void DeleteWindow (void)
  * Text with the title to set
  * 
  */
+#ifndef PSP
 void TLN_SetWindowTitle (const char* title)
 {
 	if (window != NULL)
@@ -342,6 +469,7 @@ void TLN_SetWindowTitle (const char* title)
 	if (title != NULL)
 		window_title = strdup(title);
 }
+#endif
 
 static int WindowThread (void* data)
 {
@@ -406,13 +534,19 @@ bool TLN_CreateWindow (const char* overlay, int flags)
 		return true;
 	}
 
-	if (SDL_Init (SDL_INIT_VIDEO|SDL_INIT_JOYSTICK) != 0)
-		return false;
+	#ifndef PSP
+		if (SDL_Init (SDL_INIT_VIDEO|SDL_INIT_JOYSTICK) != 0)
+			return false;
+	#else
+		if (SDL_Init (SDL_INIT_VIDEO) != 0)
+			return false;
+	#endif
 
 	/* fill parameters for window creation */
 	wnd_params.width = TLN_GetWidth ();
 	wnd_params.height = TLN_GetHeight ();
 	wnd_params.flags = flags|CWF_VSYNC;
+
 	if (overlay)
 	{
 		strncpy (wnd_params.file_overlay, overlay, MAX_PATH);
@@ -462,8 +596,13 @@ bool TLN_CreateWindowThread (const char* overlay, int flags)
 		return true;
 	}
 
-	if (SDL_Init (SDL_INIT_VIDEO|SDL_INIT_JOYSTICK) != 0)
-		return false;
+	#ifndef PSP
+		if (SDL_Init (SDL_INIT_VIDEO|SDL_INIT_JOYSTICK) != 0)
+			return false;
+	#else 
+		if (SDL_Init(SDL_INIT_VIDEO))
+			return false;
+	#endif
 
 	/* fill parameters for window creation */
 	wnd_params.retval = 0;
@@ -481,7 +620,12 @@ bool TLN_CreateWindowThread (const char* overlay, int flags)
 	cond = SDL_CreateCond ();
 
 	/* init thread & wait window creation result */
-	thread = SDL_CreateThread (WindowThread, "WindowThread", &wnd_params);
+	#ifndef PSP
+		thread = SDL_CreateThread (WindowThread, "WindowThread", &wnd_params);
+	#else 
+		thread = SDL_CreateThread (WindowThread, &wnd_params);
+	#endif
+
 	while (wnd_params.retval == 0)
 		SDL_Delay (10);
 
@@ -530,6 +674,7 @@ static void ClrInput (TLN_Player player, TLN_Input input)
 }
 
 /* process keyboard input */
+#ifndef PSP
 static void ProcessKeycodeInput (TLN_Player player, SDL_Keycode keycode, uint8_t state)
 {
 	int c;
@@ -552,8 +697,10 @@ static void ProcessKeycodeInput (TLN_Player player, SDL_Keycode keycode, uint8_t
 			ClrInput (player, input);
 	}
 }
+#endif
 
 /* process joystick button input */
+#ifndef PSP
 static void ProcessJoybuttonInput (TLN_Player player, uint8_t button, uint8_t state)
 {
 	int c;
@@ -576,8 +723,10 @@ static void ProcessJoybuttonInput (TLN_Player player, uint8_t button, uint8_t st
 			ClrInput (player, input);
 	}
 }
+#endif
 
 /* process joystic axis input */
+#ifndef PSP
 static void ProcessJoyaxisInput (TLN_Player player, uint8_t axis, int value)
 {
 	if (axis == 0)
@@ -599,6 +748,7 @@ static void ProcessJoyaxisInput (TLN_Player player, uint8_t axis, int value)
 			SetInput (player, INPUT_UP);
 	}
 }
+#endif
 
 /*!
  * \brief
@@ -617,88 +767,93 @@ static void ProcessJoyaxisInput (TLN_Player player, uint8_t axis, int value)
 bool TLN_ProcessWindow (void)
 {
 	SDL_Event evt;
-	SDL_KeyboardEvent* keybevt;
-	SDL_JoyButtonEvent* joybuttonevt;
-	SDL_JoyAxisEvent* joyaxisevt;
+	#ifndef PSP //check this CAUTION input
+		SDL_KeyboardEvent* keybevt;
+		SDL_JoyButtonEvent* joybuttonevt;
+		SDL_JoyAxisEvent* joyaxisevt;
+	#endif 
 	int input = 0;
 	int c;
 
 	if (done)
 		return false;
 
-	/* dispatch message queue */
-	while (SDL_PollEvent (&evt))
-	{
-		switch (evt.type)
+	#ifndef PSP //check this 
+		/* dispatch message queue */
+		while (SDL_PollEvent (&evt))
 		{
-		case SDL_QUIT:
-			done = true;
-			break;
-
-		case SDL_KEYDOWN:
-			keybevt = (SDL_KeyboardEvent*)&evt;
-			if (keybevt->repeat == true)
+			switch (evt.type)
+			{
+			case SDL_QUIT:
+				done = true;
 				break;
 
-			/* special inputs */
-			if (keybevt->keysym.sym == player_inputs[PLAYER1].keycodes[INPUT_QUIT])
-				done = true;
-			else if (keybevt->keysym.sym == player_inputs[PLAYER1].keycodes[INPUT_CRT])
-			{
-				crt_enable = !crt_enable;
-				if (crt_enable)
-					EnableCRTEffect();
-				else
-					TLN_DisableCRTEffect();
-			}
-			else if (keybevt->keysym.sym == SDLK_RETURN && keybevt->keysym.mod & KMOD_ALT)
-			{
-				DeleteWindow();
-				wnd_params.flags ^= CWF_FULLSCREEN;
-				CreateWindow();
-			}
+			case SDL_KEYDOWN:
+				keybevt = (SDL_KeyboardEvent*)&evt;
+				if (keybevt->repeat == true)
+					break;
 
-			/* regular user input */
-			for (c = PLAYER1; c < MAX_PLAYERS; c++)
-			{
-				if (player_inputs[c].enabled == true)
-					ProcessKeycodeInput((TLN_Player)c, keybevt->keysym.sym, keybevt->state);
-			}
-			break;
+				/* special inputs */
+				if (keybevt->keysym.sym == player_inputs[PLAYER1].keycodes[INPUT_QUIT])
+					done = true;
+				else if (keybevt->keysym.sym == player_inputs[PLAYER1].keycodes[INPUT_CRT])
+				{
+					crt_enable = !crt_enable;
+					if (crt_enable)
+						EnableCRTEffect();
+					else
+						TLN_DisableCRTEffect();
+				}
+				else if (keybevt->keysym.sym == SDLK_RETURN && keybevt->keysym.mod & KMOD_ALT)
+				{
+					DeleteWindow();
+					wnd_params.flags ^= CWF_FULLSCREEN;
+					CreateWindow();
+				}
 
-		case SDL_KEYUP:
-			keybevt = (SDL_KeyboardEvent*)&evt;
-			for (c = PLAYER1; c < MAX_PLAYERS; c++)
-			{
-				if (player_inputs[c].enabled == true)
-					ProcessKeycodeInput((TLN_Player)c, keybevt->keysym.sym, keybevt->state);
-			}
-			break;
+				/* regular user input */
+				for (c = PLAYER1; c < MAX_PLAYERS; c++)
+				{
+					if (player_inputs[c].enabled == true)
+						ProcessKeycodeInput((TLN_Player)c, keybevt->keysym.sym, keybevt->state);
+				}
+				break;
 
-		case SDL_JOYBUTTONDOWN:
-		case SDL_JOYBUTTONUP:
-			joybuttonevt = (SDL_JoyButtonEvent*)&evt;
-			for (c=PLAYER1; c<MAX_PLAYERS; c++)
-			{
-				if (player_inputs[c].enabled == true && player_inputs[c].joystick_id == joybuttonevt->which)
-					ProcessJoybuttonInput ((TLN_Player)c, joybuttonevt->button, joybuttonevt->state);
-			}
-			break;
+			case SDL_KEYUP:
+				keybevt = (SDL_KeyboardEvent*)&evt;
+				for (c = PLAYER1; c < MAX_PLAYERS; c++)
+				{
+					if (player_inputs[c].enabled == true)
+						ProcessKeycodeInput((TLN_Player)c, keybevt->keysym.sym, keybevt->state);
+				}
+				break;
 
-		case SDL_JOYAXISMOTION:
-			joyaxisevt = (SDL_JoyAxisEvent*)&evt;
-			for (c=PLAYER1; c<MAX_PLAYERS; c++)
-			{
-				if (player_inputs[c].enabled == true && player_inputs[c].joystick_id == joyaxisevt->which)
-					ProcessJoyaxisInput ((TLN_Player)c, joyaxisevt->axis, joyaxisevt->value);
+			case SDL_JOYBUTTONDOWN:
+			case SDL_JOYBUTTONUP:
+				joybuttonevt = (SDL_JoyButtonEvent*)&evt;
+				for (c=PLAYER1; c<MAX_PLAYERS; c++)
+				{
+					if (player_inputs[c].enabled == true && player_inputs[c].joystick_id == joybuttonevt->which)
+						ProcessJoybuttonInput ((TLN_Player)c, joybuttonevt->button, joybuttonevt->state);
+				}
+				break;
+
+			case SDL_JOYAXISMOTION:
+				joyaxisevt = (SDL_JoyAxisEvent*)&evt;
+				for (c=PLAYER1; c<MAX_PLAYERS; c++)
+				{
+					if (player_inputs[c].enabled == true && player_inputs[c].joystick_id == joyaxisevt->which)
+						ProcessJoyaxisInput ((TLN_Player)c, joyaxisevt->axis, joyaxisevt->value);
+				}
+				break;
 			}
-			break;
-    	}
 
 		/* procesa eventos de usuario */
 		if (sdl_callback != NULL)
 			sdl_callback(&evt);
 	}
+	#endif
+
 
 	/* delete */
 	if (done)
@@ -799,11 +954,18 @@ void TLN_EnableCRTEffect (TLN_Overlay overlay, uint8_t overlay_factor, uint8_t t
 	int c;
 
 	/* create framebuffer texture with linear scaling */
-	if (backbuffer != NULL)
-		SDL_DestroyTexture(backbuffer);
-	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
-	backbuffer = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, wnd_params.width, wnd_params.height);
-	SDL_SetTextureAlphaMod(backbuffer, 0);
+	#ifndef PSP //check this 
+		if (backbuffer != NULL)
+			SDL_DestroyTexture(backbuffer);
+		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
+		backbuffer = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, wnd_params.width, wnd_params.height);
+		SDL_SetTextureAlphaMod(backbuffer, 0);
+	#else 
+		if (backbuffer != NULL)
+			SDL_FreeSurface(backbuffer);
+		backbuffer = SDL_CreateRGBSurface(0, wnd_params.width, wnd_params.height, 32, 0, 0, 0, 0);
+	#endif
+	
 
 	/* cache parameters to persist between fullscreen toggles*/
 	crt_params.overlay = overlay;
@@ -819,7 +981,9 @@ void TLN_EnableCRTEffect (TLN_Overlay overlay, uint8_t overlay_factor, uint8_t t
 	crt_enable = true;
 	crt.gaussian = blur;
 	crt.glow_factor = glow_factor;
-	SDL_SetTextureAlphaMod (crt.glow, glow_factor);
+	#ifndef PSP //check this CAUTION
+		SDL_SetTextureAlphaMod (crt.glow, glow_factor);
+	#endif
 
 	for (c=0; c<threshold; c++)
 		crt.table[c] = lerp (c, 0,threshold, v0,v1);
@@ -848,11 +1012,20 @@ void TLN_EnableCRTEffect (TLN_Overlay overlay, uint8_t overlay_factor, uint8_t t
 void TLN_DisableCRTEffect (void)
 {
 	/* create framebuffer texture with neartest */
-	if (backbuffer != NULL)
-		SDL_DestroyTexture(backbuffer);
-	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-	backbuffer = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, wnd_params.width, wnd_params.height);
-	SDL_SetTextureAlphaMod(backbuffer, 0);
+	#ifndef PSP
+		if (backbuffer != NULL)
+			SDL_DestroyTexture(backbuffer);
+		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+		backbuffer = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, wnd_params.width, wnd_params.height);
+		SDL_SetTextureAlphaMod(backbuffer, 0);
+	#endif
+	#ifdef PSP
+		if (backbuffer != NULL)
+			SDL_FreeSurface(backbuffer);
+		backbuffer = SDL_CreateRGBSurface(0 , wnd_params.width, wnd_params.height, 32, 0, 0, 0, 0);
+		SDL_SetColorKey(backbuffer,SDL_SRCCOLORKEY|SDL_RLEACCEL,SDL_MapRGB(backbuffer->format,255,255,255));//check this 
+		SDL_SetAlpha(backbuffer, SDL_SRCALPHA, SDL_ALPHA_OPAQUE);//check this 
+	#endif
 	crt_enable = false;
 }
 
@@ -933,6 +1106,7 @@ void TLN_EnableInput (TLN_Player player, bool enable)
  */
 void TLN_AssignInputJoystick (TLN_Player player, int index)
 {
+	#ifndef PSP
 	PlayerInput* player_input = &player_inputs[player];
 	if (player_input->joy != NULL)
 	{
@@ -944,6 +1118,7 @@ void TLN_AssignInputJoystick (TLN_Player player, int index)
 		player_input->joy = SDL_JoystickOpen (index);
 		player_input->joystick_id = SDL_JoystickInstanceID (player_input->joy);
 	}
+	#endif
 }
 
 /*!
@@ -959,10 +1134,12 @@ void TLN_AssignInputJoystick (TLN_Player player, int index)
  * \param keycode
  * ASCII key value or scancode as defined in SDL.h
  */
+#ifndef PSP
 void TLN_DefineInputKey (TLN_Player player, TLN_Input input, uint32_t keycode)
 {
 	player_inputs[player].keycodes[input & INPUT_MASK] = keycode;
 }
+#endif
 
 /*!
  * \brief
@@ -998,7 +1175,13 @@ int TLN_GetLastInput (void)
 
 static void BeginWindowFrame (void)
 {
-	SDL_LockTexture (backbuffer, NULL, (void**)&rt_pixels, &rt_pitch);
+	#ifndef PSP
+		SDL_LockTexture (backbuffer, NULL, (void**)&rt_pixels, &rt_pitch);
+	#endif
+	#ifdef PSP 
+		rt_pixels = backbuffer->pixels;
+		rt_pitch = backbuffer->pitch;
+	#endif
 	TLN_SetRenderTarget (rt_pixels, rt_pitch);
 }
 
@@ -1013,14 +1196,25 @@ static void EndWindowFrame (void)
 		int pitch_glow;
 
 		/* downscale backbuffer */
-		SDL_LockTexture (crt.glow, NULL, (void**)&pixels_glow, &pitch_glow);
+		#ifndef PSP
+			SDL_LockTexture (crt.glow, NULL, (void**)&pixels_glow, &pitch_glow);
+		#endif 
+		#ifdef PSP 
+			SDL_LockSurface (crt.glow);
+			pixels_glow = crt.glow->pixels;
+			pitch_glow = crt.glow->pitch;
+		#endif 
 		Downsample2 (rt_pixels, pixels_glow, wnd_params.width,wnd_params.height, rt_pitch, pitch_glow);
 
 		/* apply gaussian blur (opitional) */
 		if (crt.gaussian)
 			GaussianBlur (pixels_glow, (uint8_t*)crt.blur->pixels, dst_width,dst_height,pitch_glow, 2);
 
-		SDL_UnlockTexture (crt.glow);
+		#ifndef PSP
+			SDL_UnlockTexture (crt.glow);
+		#else 
+			SDL_UnlockSurface (crt.glow);
+		#endif
 	}
 
 	/* horizontal blur in-place */
@@ -1028,19 +1222,39 @@ static void EndWindowFrame (void)
 		hblur (rt_pixels, wnd_params.width, wnd_params.height, rt_pitch);
 
 	/* end frame and apply overlay */
-	SDL_UnlockTexture (backbuffer);
+	#ifndef PSP //check this CAUTION
+		SDL_UnlockTexture (backbuffer);
+		SDL_RenderClear (renderer);
+		SDL_RenderCopy (renderer, backbuffer, NULL, &dstrect);
+		// SDL_RenderCopy(SDL_Renderer*  renderer,  SDL_Texture* srctexture, const SDL_Rect* srcrect,  const SDL_Rect* dstrect)
 
-	SDL_RenderClear (renderer);
-	SDL_RenderCopy (renderer, backbuffer, NULL, &dstrect);
+
+	#else 
+		SDL_UnlockSurface (backbuffer);
+		SDL_BlitSurface(backbuffer, NULL, window, &dstrect);
+		//SDL_BlitSurface(SDL_Surface *src, SDL_Rect *srcrect, SDL_Surface *dst, SDL_Rect *dstrect);
+
+	#endif
 
 	if (crt_enable)
 	{
-		if (crt.overlay_id != TLN_OVERLAY_NONE)
-			SDL_RenderCopy (renderer, crt.overlay, NULL, &dstrect);
-		if (crt.glow_factor != 0)
-			SDL_RenderCopy (renderer, crt.glow, NULL, &dstrect);
+		#ifndef PSP //check this CAUTION
+			if (crt.overlay_id != TLN_OVERLAY_NONE)
+				SDL_RenderCopy (renderer, crt.overlay, NULL, &dstrect);
+			if (crt.glow_factor != 0)
+				SDL_RenderCopy (renderer, crt.glow, NULL, &dstrect);
+		#else 
+			if (crt.overlay_id != TLN_OVERLAY_NONE)
+				SDL_BlitSurface (crt.overlay, NULL, window, &dstrect);
+			if (crt.glow_factor != 0)
+				SDL_BlitSurface (crt.glow, NULL, window, &dstrect);
+		#endif
 	}
-	SDL_RenderPresent (renderer);
+	#ifndef PSP
+		SDL_RenderPresent (renderer);
+	#else 
+		SDL_Flip(window);
+	#endif
 }
 
 /*!
@@ -1114,6 +1328,7 @@ void TLN_SetSDLCallback(TLN_SDLCallback callback)
 }
 
 /* fills full-frame overlay texture with repeated pattern */
+#ifndef PSP
 static void BuildFullOverlay (SDL_Texture* texture, SDL_Surface* pattern, uint8_t factor)
 {
 	SDL_Surface* src_surface;
@@ -1162,6 +1377,61 @@ static void BuildFullOverlay (SDL_Texture* texture, SDL_Surface* pattern, uint8_
 	SDL_FreeSurface (dst_surface);
 	SDL_FreeSurface (src_surface);
 }
+#endif 
+
+#ifdef PSP 
+static void BuildFullOverlay (SDL_Surface* texture, SDL_Surface* pattern, uint8_t factor)
+{
+	SDL_Surface* src_surface;
+	SDL_Surface* dst_surface;
+	SDL_Rect rect;
+	uint8_t* pixels = NULL;
+	uint8_t* add_table = SelectBlendTable (BLEND_ADD);
+	int pitch = 0;
+	int x,y;
+
+	/* create auxiliar surfaces */
+	src_surface = SDL_CreateRGBSurface (0, pattern->w, pattern->h, 32, 0,0,0,0);
+	dst_surface = SDL_CreateRGBSurface (0, wnd_width, wnd_height, 32, 0,0,0,0);
+
+	/* modulate overlay brightness in source surface */
+	for (y=0; y<pattern->h; y++)
+	{
+		uint8_t* srcpixel = (uint8_t*)pattern->pixels + y*pattern->pitch;
+		uint8_t* dstpixel = (uint8_t*)src_surface->pixels + y*src_surface->pitch;
+		for (x=0; x<pattern->w; x++)
+		{
+			dstpixel[0] = blendfunc(add_table, srcpixel[0], factor);
+			dstpixel[1] = blendfunc(add_table, srcpixel[1], factor);
+			dstpixel[2] = blendfunc(add_table, srcpixel[2], factor);
+			dstpixel[3] = 255;
+			srcpixel += sizeof(uint32_t);
+			dstpixel += sizeof(uint32_t);
+		}
+	}
+
+	/* fill destination surface with mosaic of modulated source surface */
+	rect.w = pattern->w;
+	rect.h = pattern->h;
+	for (rect.y=0; rect.y<dst_surface->h; rect.y+=rect.h)
+	{
+		for (rect.x=0; rect.x<dst_surface->w; rect.x+=rect.w)
+			SDL_BlitSurface (src_surface, NULL, dst_surface, &rect);
+	}
+
+	/* copy pixels into final texture */
+	//check this CAUTION texture
+	SDL_LockSurface (texture);
+	memcpy (texture->pixels, dst_surface->pixels, pitch*dst_surface->h);
+	SDL_UnlockSurface (texture);
+ 
+	
+	/* release resources */
+	SDL_FreeSurface (dst_surface);
+	SDL_FreeSurface (src_surface);
+}
+
+#endif 
 
 /* basic horizontal blur emulating RF blurring */
 static void hblur (uint8_t* scan, int width, int height, int pitch)
@@ -1184,7 +1454,7 @@ static void hblur (uint8_t* scan, int width, int height, int pitch)
 	}
 }
 
-/* resample rápido dividio 2 */
+/* resample rï¿½pido dividio 2 */
 static void Downsample2 (uint8_t* src, uint8_t* dst, int width, int height, int src_pitch, int dst_pitch)
 {
 	uint8_t* src_pixel;
